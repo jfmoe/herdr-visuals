@@ -137,6 +137,10 @@ previews keep working if the original temporary file is gone. Tool code is never
 executed or searched for image paths. Embedded images can be exported with `e`;
 `g` shows image context, and `y` explains how to export instead of copying Base64.
 Images use the same navigation, filtering, pinning, zoom/pan and export controls.
+Completed Codex image-generation records also appear directly, including the
+original image behind a `Saved to: file://...` notice. Visuals prefers the embedded
+original and uses the typed saved path when pixels are absent. It does not search
+arbitrary tool logs for paths, and the matching tool-result preview is not repeated.
 Large images automatically fit the preview area. Complex previews are downsampled
 in memory to fit Herdr's 512 KiB inline image limit and 1 MiB socket request
 limit, preserving the complete viewport.
@@ -164,7 +168,8 @@ show the source and the parser error instead of silently changing the input.
 Use `aligned` inside math delimiters for multi-line derivations.
 
 Codex is resolved using the exact `agent_session` ID reported by Herdr. The
-adapter reads assistant final messages and typed images in tool results from that
+adapter reads assistant final messages, typed images in tool results, and completed
+image-generation records from that
 session's JSONL transcript. Prompts, tool text, commentary and internal reasoning
 are excluded. A shared working directory is never used to select another session.
 History is bounded to the last 16 MiB and 300 answer/image records. If the JSONL

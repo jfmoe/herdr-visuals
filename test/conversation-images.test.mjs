@@ -17,6 +17,82 @@ const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
 const row = payload => JSON.stringify({ type: 'response_item', timestamp: '2026-09-15T00:00:00Z', payload });
 const result = (type, output, call_id = 'image-call') => row({ type, call_id, output });
 
+test('completed image-generation records retain saved files and deduplicate their tool output', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hv-generated-'));
+  const file = path.join(dir, 'generated sample.png');
+  try {
+    await fs.writeFile(file, Buffer.from(png.split(',')[1], 'base64'));
+    const event = payload => JSON.stringify({ type: 'event_msg', payload });
+    const generated = { call_id: 'generated-call', status: 'completed', result: png.split(',')[1], saved_path: file };
+    const transcript = [
+      event({ type: 'image_generation_end', ...generated }),
+      row({ type: 'image_generation_call', id: generated.call_id, ...generated }),
+      result('function_call_output', [{ type: 'input_image', image_url: png }], generated.call_id),
+      event({ type: 'image_generation_end', call_id: 'saved-only', status: 'completed', saved_path: file }),
+      event({ type: 'item_completed', item: { type: 'Extension', kind: 'image_gen.generation', id: 'nested-generation',
+        status: 'completed', result: png.split(',')[1], savedPath: file + '.png' } }),
+      result('custom_tool_call_output', [{ type: 'input_image', image_url: png },
+        { type: 'input_text', text: `Generated images are saved as ${file}.png by default.` }], 'outer-exec'),
+    ].join('\n');
+    const messages = parseRollout(transcript);
+    const blocks = messages.flatMap(m => m.blocks);
+    assert.equal(blocks.length, 3);
+    assert.equal(blocks[0].imageData, png);
+    assert.equal(blocks[1].source, file);
+    const renderer = new Renderer();
+    try {
+      const frame = await renderer.render(blocks[1], { width: 400, height: 240 });
+      assert.equal(frame.error, '');
+      assert.equal(await renderer.page.locator('#content img').evaluate(el => el.naturalWidth), 1);
+      assert.ok(frame.png.length > 100);
+    } finally { await renderer.close(); }
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test('generation adapters ignore prompts, unfinished events, remote paths and arbitrary saved-to text', () => {
+  const event = payload => JSON.stringify({ type: 'event_msg', payload });
+  const messages = parseRollout([
+    event({ type: 'image_generation_end', status: 'failed', result: png.split(',')[1], saved_path: '/tmp/rejected.png' }),
+    event({ type: 'image_generation_end', status: 'in_progress', saved_path: '/tmp/rejected.png' }),
+    event({ type: 'image_generation_end', status: 'completed', saved_path: 'https://example.com/rejected.png' }),
+    event({ type: 'image_generation_end', status: 'completed', saved_path: 'relative.png' }),
+    event({ type: 'image_generation_end', status: 'completed', saved_path: '/tmp/rejected.txt', revised_prompt: png }),
+    result('custom_tool_call_output', 'Saved to: file:///tmp/unrelated.png'),
+    row({ type: 'image_generation_call', id: 'native-generation', status: 'completed', result: png.split(',')[1] }),
+  ].join('\n'));
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].blocks[0].imageData, png);
+  assert.doesNotMatch(messages[0].text, /rejected|unrelated/);
+});
+
+test('appended pixels replace a generation file fallback and refresh the selected item', () => {
+  const saved = JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: {
+    type: 'Extension', kind: 'image_gen.generation', id: 'generated', status: 'completed', savedPath: 'file:///tmp/sample.png',
+  } } });
+  const initial = parseRollout(saved);
+  const updated = parseRollout(saved + '\n' + result('function_call_output', [{ type: 'input_image', image_url: png }], 'generated'));
+  assert.equal(initial[0].blocks[0].source, '/tmp/sample.png');
+  assert.equal(updated.length, 1);
+  assert.notEqual(initial[0].id, updated[0].id);
+  assert.equal(updated[0].blocks[0].messageId, updated[0].id);
+  const model = new PreviewModel(); model.update(initial);
+  assert.equal(model.update(updated), true);
+  assert.equal(model.current.imageData, png);
+});
+
+test('later saved-path metadata deduplicates a code-mode mirror of an earlier native generation', () => {
+  const messages = parseRollout([
+    row({ type: 'image_generation_call', id: 'generated', status: 'completed', result: png.split(',')[1] }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'image_generation_end', call_id: 'generated',
+      status: 'completed', saved_path: '/tmp/sample.png' } }),
+    result('custom_tool_call_output', [{ type: 'input_image', image_url: png },
+      { type: 'input_text', text: 'Generated images are saved as /tmp/sample.png by default.' }], 'outer-exec'),
+  ].join('\n'));
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].blocks[0].source, '/tmp/sample.png');
+  assert.equal(messages[0].blocks[0].imageData, png);
+});
+
 test('actual images in tool results become image items without a final answer or local file', async () => {
   const transcript = [
     row({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Inspect the pictures.' }] }),
