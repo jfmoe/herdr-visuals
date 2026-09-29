@@ -4,6 +4,17 @@ import os from 'node:os';
 import { extract, digest } from './extract.mjs';
 import { imageDataURL } from './images.mjs';
 
+function unavailable(connected) {
+  return { messages: [], origin: 'Exact Codex transcript unavailable', limited: false,
+    issue: connected ? {
+      title: 'The bound Codex transcript is unavailable.',
+      hint: 'Check the Codex home and transcript location; or preview selected text.',
+    } : {
+      title: 'Codex session is not connected.',
+      hint: "Check Herdr's Codex SessionStart integration; or preview selected text.",
+    } };
+}
+
 function outputImages(output) {
   if (typeof output === 'string') {
     try { output = JSON.parse(output); } catch { return []; }
@@ -90,13 +101,13 @@ export class SourceReader {
           const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
           text = buffer.subarray(0, bytesRead).toString('utf8');
         } finally { await handle.close(); }
-        const value = { messages: parseRollout(text, { cwd: pane.foreground_cwd || pane.cwd }), origin: 'Codex transcript', limited: stat.size > 16 * 1024 * 1024 };
+        const value = { messages: parseRollout(text, { cwd: pane.foreground_cwd || pane.cwd }), origin: 'Codex transcript', limited: stat.size > 16 * 1024 * 1024, issue: null };
         this.last = { file, size: stat.size, mtime: stat.mtimeMs, value };
         return value;
       }
     }
     // A terminal's scrollback can contain earlier sessions. Never use it as
     // a substitute for the exact session transcript.
-    return { messages: [], origin: 'Exact Codex transcript unavailable · select text to preview', limited: false };
+    return unavailable(pane.agent_session?.agent === 'codex' && pane.agent_session.kind === 'id');
   }
 }

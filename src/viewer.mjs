@@ -15,6 +15,7 @@ import { answerContext, paneIdentity } from './navigation.mjs';
 const model = new PreviewModel(), renderer = new Renderer(), reader = new SourceReader();
 let contextView = null, navigating = false;
 let sourcePane = process.env.HERDR_VISUALS_SOURCE, origin = '', sourceLabel = '', notice = '';
+let sourceIssue = null;
 let raw = false, list = false, help = false, search = null, zoom = 1, x = 0, y = 0, fitDiagram = false;
 let stopping = false, drawing = false, dirty = true, polling = false, request = 0, selection = false;
 let lastImageKey, metrics, timer, hasImage = false, exporting = false, sessionIdentity;
@@ -35,7 +36,7 @@ function line(row, text, color = '') {
   process.stdout.write(`\x1b[${row};1H\x1b[2K${color}${fit(text, (process.stdout.columns || 80) - 1)}\x1b[0m`);
 }
 function resetView() { x = 0; y = 0; zoom = 1; lastImageKey = null; dirty = true; viewRevision++; }
-function resetSource() { sourceGeneration++; model.resetSource(); contextView = null; resetView(); }
+function resetSource() { sourceGeneration++; model.resetSource(); sourceIssue = null; contextView = null; resetView(); }
 function contextRows(context, width) {
   if (context.wrappedWidth === width) return context.wrapped;
   const result = [];
@@ -98,7 +99,9 @@ async function poll() {
       const readGeneration = sourceGeneration;
       const value = await reader.read(pane);
       if (sourcePane !== expectedSource || selection || sourceGeneration !== readGeneration) return;
-      origin = value.origin + (value.limited ? ' · partial history' : '');
+      const nextOrigin = value.origin + (value.limited ? ' · partial history' : '');
+      if (origin !== nextOrigin || sourceIssue?.title !== value.issue?.title) dirty = true;
+      origin = nextOrigin; sourceIssue = value.issue;
       if (model.update(value.messages)) dirty = true;
     }
   } catch (error) { const next = error.message; if (notice !== next) { notice = next; dirty = true; } }
@@ -111,7 +114,7 @@ async function draw() {
   try {
     line(1, ` VISUALS   ${model.pinned ? 'PINNED' : model.follow ? 'LIVE' : 'BROWSING'}   ${sourceLabel}`, '\x1b[1;38;2;52;91;116m');
     line(2, ` ${model.history ? 'This session' : 'Latest turn'} · ${model.filter} · ${model.items.length} items${model.pending ? ` · ${model.pending} new answer/image record(s) — r to refresh` : ''}`);
-    line(3, ` ${model.current ? `${model.index + 1}/${model.items.length}  ${model.current.title}` : 'No diagrams, equations or image paths in this answer.'}`);
+    line(3, ` ${model.current ? `${model.index + 1}/${model.items.length}  ${model.current.title}` : sourceIssue?.title || 'No diagrams, equations or image paths in this scope.'}`);
     line(4, contextView ? ` ${contextView.kind === 'image' ? 'Image' : 'Answer'} context · highlighted item · line ${contextView.start + 1}` : ` ${origin}${model.query ? ` · search: ${model.query}` : ''}`, '\x1b[2m');
     line(rows - 2, search !== null ? ` Search: ${search}_` : ` ${notice || '[ ] items  l list  f type  h scope  / search'}`);
     line(rows - 1, contextView ? ' j/k scroll  g / Esc return to preview  ? help' : ' g go to answer  p pin  r live  s source  ? help');
@@ -125,7 +128,7 @@ async function draw() {
         const start = Math.max(0, model.index - Math.floor((rows - 9) / 2));
         model.items.slice(start, start + rows - 8).forEach((b, i) => line(i + 6,
           ` ${b.id === model.current?.id ? '>' : ' '} ${start + i + 1}. ${b.type.toUpperCase()}  ${b.title}`, b.id === model.current?.id ? '\x1b[1m' : ''));
-      } else line(6, rows < 12 || cols < 28 ? ' Enlarge this pane to preview.' : ' h: previous answers   r: latest   q: close');
+      } else line(6, rows < 12 || cols < 28 ? ' Enlarge this pane to preview.' : ` ${sourceIssue?.hint || 'h: previous answers   r: latest   q: close'}`);
       return;
     }
     if (contextView) {

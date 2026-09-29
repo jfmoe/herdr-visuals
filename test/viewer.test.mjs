@@ -94,7 +94,7 @@ test('viewer reads only its bound session and clears a pin when that pane starts
     type: 'response_item', payload: { type: 'message', role: 'assistant', phase: 'final_answer',
       content: [{ type: 'output_text', text: `## Session ${i + 1}\n$$x_${i + 1}$$` }] },
   }) + '\n');
-  let currentId = ids[0], getError = false, getDelay = 0; const calls = [];
+  let currentId = null, getError = false, getDelay = 0; const calls = [];
   const socketPath = path.join(dir, 'herdr.sock');
   const server = net.createServer(socket => {
     let buffer = ''; socket.setEncoding('utf8'); socket.on('error', () => {});
@@ -103,7 +103,7 @@ test('viewer reads only its bound session and clears a pin when that pane starts
       const call = JSON.parse(buffer.slice(0, buffer.indexOf('\n'))); calls.push(call);
       let result = {};
       if (call.method === 'pane.get') result = { pane: { pane_id: 'source', terminal_id: 'terminal', agent: 'codex', cwd: dir,
-        agent_session: { agent: 'codex', kind: 'id', value: currentId } } };
+        ...(currentId ? { agent_session: { agent: 'codex', kind: 'id', value: currentId } } : {}) } };
       if (call.method === 'pane.graphics.info') result = { cell_width_px: 20, cell_height_px: 40, pane_visible: true };
       // Any unscoped focus/session-list query is a regression, regardless of its result.
       const response = call.method === 'pane.get' && getError ? { id: call.id, error: { message: 'offline' } } : { id: call.id, result };
@@ -119,7 +119,12 @@ test('viewer reads only its bound session and clears a pin when that pane starts
   let output = ''; child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { output += data; });
   const keys = value => child.stdin.write(JSON.stringify({ keys: value }) + '\n');
   try {
+    await until(() => output.includes('Codex session is not connected.'), 'missing session identity is actionable');
+    assert.doesNotMatch(output, /No diagrams/);
+    assert.match(output, /SessionStart/);
+    output = ''; currentId = ids[0];
     await until(() => output.includes('Session 1') && calls.some(c => c.method === 'pane.graphics.set'), 'first session');
+    assert.doesNotMatch(output, /not connected/);
     getError = true; output = ''; keys('g');
     await until(() => output.includes('Cannot verify source session'), 'lookup error fails closed');
     assert.doesNotMatch(output, /Answer context/);

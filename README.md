@@ -172,6 +172,13 @@ file cannot be located, the UI shows an unavailable state. It never scans termin
 scrollback, because that can contain older sessions. Explicit selected-text preview
 remains available. Automatic history discovery currently supports Codex only.
 
+If Visuals says **Codex session is not connected**, Herdr has not supplied the
+source pane's session identity. Check `herdr integration status` and the Codex
+SessionStart integration. This is different from a connected session containing
+no visual items, or an identified transcript that cannot be found. Visuals retries
+the bound pane automatically when its identity becomes available; it never guesses
+from the working directory. Selected-text previews still work while disconnected.
+
 Only the active source is read. Conversation text is kept in process memory;
 source pane handles are stored in the plugin state directory. Files are saved
 only when you press export. Mermaid uses strict mode; KaTeX disables trusted

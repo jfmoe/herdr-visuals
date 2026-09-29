@@ -83,6 +83,17 @@ test('reading an exact Codex session handles append and refuses unrelated sessio
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
+test('source availability distinguishes an unbound pane from a missing transcript', async () => {
+  const reader = new SourceReader();
+  const unbound = await reader.read({ agent: 'codex' });
+  assert.equal(unbound.issue.title, 'Codex session is not connected.');
+  assert.match(unbound.issue.hint, /SessionStart/);
+  assert.deepEqual(unbound.messages, []);
+  const invalid = await reader.read({ agent_session: { agent: 'codex', kind: 'id', value: 'invalid' } });
+  assert.equal(invalid.issue.title, 'The bound Codex transcript is unavailable.');
+  assert.notEqual(invalid.issue.hint, unbound.issue.hint);
+});
+
 test('pinning and browsing preserve the viewed item until follow is resumed', () => {
   const model = new PreviewModel();
   const first = { id: 'first', blocks: extract(example, 'first') }, second = { id: 'second', blocks: extract('$$z$$', 'second') };

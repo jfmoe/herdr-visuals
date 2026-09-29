@@ -100,7 +100,7 @@ test('real viewer lists embedded images, opens image context and clears them on 
     await until(() => calls.some(c => c.method === 'pane.graphics.set'));
     assert.match(output, /2 items/);
     keys('l'); await until(() => output.includes('IMAGE  Image 1') && output.includes('IMAGE  Image 2'));
-    keys('\r'); keys('g'); await until(() => output.includes('Image context'));
+    keys('\r'); keys('g'); await until(() => output.includes('Image context') && output.includes('Embedded image displayed in this conversation'));
     assert.match(output, /Embedded image displayed in this conversation/);
     assert.doesNotMatch(output, /PRIVATE LOG|base64/);
     const frames = calls.filter(c => c.method === 'pane.graphics.set').length;
