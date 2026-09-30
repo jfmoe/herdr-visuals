@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { extract, extractSelection } from '../src/extract.mjs';
-import { parseRollout, SourceReader } from '../src/source.mjs';
+import { parseRollout, SourceReader } from '../src/sources/index.mjs';
 import { PreviewModel } from '../src/model.mjs';
 import { Renderer } from '../src/render.mjs';
 import { resolveImage, imageReferences, readImage } from '../src/images.mjs';

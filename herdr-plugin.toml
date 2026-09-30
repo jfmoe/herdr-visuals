@@ -1,7 +1,7 @@
 id = "hx-w.visuals"
 name = "Visuals"
-version = "0.1.7"
-description = "Preview Mermaid, LaTeX and local images through native Kitty graphics."
+version = "0.2.0"
+description = "Preview Claude Code and Codex Mermaid, LaTeX and images through native Kitty graphics."
 min_herdr_version = "0.9.2"
 platforms = ["macos", "linux"]
 

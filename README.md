@@ -1,13 +1,16 @@
 # Herdr Visuals
 
-Preview Mermaid diagrams, LaTeX equations, and local images beside your Codex
-conversation in a Herdr split pane. Open with **prefix+v**, browse or pin an item,
+Preview Mermaid diagrams, LaTeX equations, and local images beside your Claude Code or Codex
+conversation in a Herdr split pane. Open with **Alt+M** (Option+M on macOS), browse or pin an item,
 and keep working. Rendering runs locally, without a cloud renderer, API key, or
 model call.
 
 - Browse diagrams, equations, image links, and images displayed by Codex tools.
 - Zoom, pan, inspect the original source, or jump to the containing answer.
 - Search within the bound session and export the selected item as PNG and Markdown.
+
+This fork adds read-only Claude Code session support to [hx-w/herdr-visuals](https://github.com/hx-w/herdr-visuals).
+The renderer and interaction model are shared by both agents.
 
 ## Screenshots
 
@@ -35,7 +38,7 @@ Requires Herdr 0.9.2+ (0.9.3 recommended), Node.js 22+, npm, and a
 graphics-capable terminal such as Ghostty, kitty, or WezTerm. Herdr's `[terminal].kitty_graphics` must be enabled.
 
 ```sh
-herdr plugin install hx-w/herdr-visuals --ref v0.1.7
+herdr plugin install jfmoe/herdr-visuals --ref v0.2.0
 ```
 
 Installation runs `npm ci --ignore-scripts` and downloads Playwright's pinned
@@ -47,15 +50,16 @@ Add to your Herdr `config.toml`, then run `herdr server reload-config`:
 
 ```toml
 [[keys.command]]
-key = "prefix+v"
+key = "alt+m"
 type = "plugin_action"
 command = "hx-w.visuals.open"
 description = "Visual previews"
 ```
 
-`prefix` is your existing Herdr prefix, followed by `v`. This does not change
-the prefix itself. From a local checkout, `node scripts/bind-key.mjs` adds this
-binding, preserves other settings, backs up the file, and refuses conflicts.
+`Alt+M` is a direct shortcut; no Herdr prefix is required. The bundled
+setup script refuses an existing custom binding for that combination. From a
+local checkout, `node scripts/bind-key.mjs` adds the binding, preserves other
+settings and backs up the file.
 
 Try the bundled diagram and three equations:
 
@@ -64,7 +68,14 @@ herdr plugin action invoke hx-w.visuals.example
 ```
 
 Use `[` / `]` to browse, `0` to fit a wide diagram, and `s` to inspect its source.
-To preview your conversation, open Visuals from the Codex pane with **prefix+v**.
+To preview your conversation, open Visuals from the Claude Code or Codex pane with **Alt+M** (Option+M on macOS).
+
+For Claude Code, Visuals uses the exact session ID or transcript path already
+reported by Herdr's Claude integration. It reads only the matching main-session
+JSONL file. No Claude configuration, hooks, transcripts or running sessions are
+modified. If Herdr has not supplied an identity, the preview shows a connection
+message and retries; it never guesses by working directory. Existing Herdr
+integration setup is a prerequisite. Visuals does not install or repair it.
 
 For Codex versions that use a shared app-server daemon, put `thread-id` first in
 the existing `[tui].status_line` array in your Codex `config.toml`. Keep your other
@@ -84,7 +95,7 @@ Never substitute an ID found by matching the working directory.
 
 ## Interaction
 
-- **prefix+v**: open beside the current pane; focus an existing preview in the
+- **Alt+M** (Option+M on macOS): open beside the current pane; focus an existing preview in the
   current tab; close when pressed from the preview itself.
 - The preview is bound to the session from which it was opened. Focusing
   another agent does not read that agent's history. Opening explicitly from a
@@ -132,8 +143,9 @@ The preview uses a neutral light palette and renders at twice CSS resolution
 for high-DPI terminals.
 
 Selected text, when supplied by Herdr's invocation context, takes precedence
-over transcript discovery. This also accepts bare Mermaid or raw math explicitly
-selected by the user. Press `r` to return to the session.
+over transcript discovery. Copying to the system clipboard alone does not supply
+selected text; Visuals does not read the clipboard. This also accepts bare
+Mermaid or raw math explicitly selected by the user. Press `r` to return to the session.
 
 ## What gets rendered
 
@@ -200,7 +212,42 @@ and completed image-generation records. Prompts, tool text, commentary and
 internal reasoning are excluded. History keeps the newest 1,000 API items within
 a 16 MiB budget (the final complete item may exceed it), then at most 300
 answer/image records. Partial history is labeled. Explicit selected-text preview
-remains available. Automatic session reading currently supports Codex only.
+remains available. Automatic session reading supports Claude Code and Codex.
+
+### Claude Code sessions
+
+Claude records are polled once per second. Only complete JSONL lines and complete
+Mermaid/math blocks are previewed; Claude writes transcripts asynchronously, so
+this follows saved content rather than individual streamed tokens. Assistant text
+records may appear before tool calls as well as in the final response: the log has
+no reliable Codex-style final-answer phase. Distinct persisted blocks sharing an
+API message ID are retained. Thinking, user prompts, compact summaries, metadata
+and subagent records are excluded.
+
+Mermaid, display math and local image references in assistant text use the same
+list, search, scope, pin, source/context, zoom/pan and export controls as Codex.
+Typed Base64 images inside successful tool results are also supported, including
+parallel tool results. Image context describes the returned image without exposing
+tool logs. User-attached images, URL-backed tool images, and file paths mentioned
+only in tool output are not indexed. There is no Claude-specific image-generation
+adapter or scan of arbitrary tool logs.
+
+The preview retains the saved main-session history across compaction. It does not
+reconstruct the model's current context or a parent-UUID branch. A resumed session
+uses the same file; clear/fork follows the new identity reported by Herdr and resets
+items and pins. If two panes resume the same Claude session, their writes share
+one transcript and cannot be separated by pane.
+
+Claude history keeps the newest 300 answer/image records from a 16 MiB file tail;
+truncated history is labeled. A custom directory can be supplied with
+`HERDR_VISUALS_CLAUDE_HOME`, then `CLAUDE_CONFIG_DIR`, otherwise `~/.claude`.
+Explicit transcript paths take precedence. ID lookup examines exact main-session
+filenames in the `projects` directories; duplicate matches require an exact path.
+Unavailable or non-regular files show an error rather than reading another session.
+The internal Claude JSONL format can change; unknown content types are ignored.
+
+These boundaries follow [Claude's transcript and session documentation](https://code.claude.com/docs/en/hooks#common-input-fields)
+and were checked against local Claude Code 2.1.281/2.1.284 records.
 
 If Visuals says **Codex session is not connected**, Herdr has not supplied the
 source pane's session identity. Configure the Codex footer as described above or
@@ -222,6 +269,7 @@ Optional environment variables:
 | Variable | Purpose |
 | --- | --- |
 | `HERDR_VISUALS_CODEX_HOME` | Custom Codex home; otherwise `CODEX_HOME`, then `~/.codex` |
+| `HERDR_VISUALS_CLAUDE_HOME` | Custom Claude directory; otherwise `CLAUDE_CONFIG_DIR`, then `~/.claude` |
 | `HERDR_VISUALS_EXPORT_DIR` | Export parent directory; otherwise `~/Downloads` |
 
 ## Development and verification
@@ -247,4 +295,5 @@ that exporting immediately after changing items exports the selected item.
 
 Uninstall with `herdr plugin uninstall hx-w.visuals` (or `plugin unlink` for a
 local checkout), and remove only the `hx-w.visuals.open` keybinding. Existing
-exports and the config backup remain yours. No Codex files are modified.
+exports and the config backup remain yours. No Claude Code files are modified.
+Codex footer setup is an optional, separate user configuration step.

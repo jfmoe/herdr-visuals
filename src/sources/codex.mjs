@@ -2,11 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { extract, digest } from './extract.mjs';
-import { imageDataURL, IMAGE_EXT, resolveImage } from './images.mjs';
+import { extract, digest } from '../extract.mjs';
+import { imageDataURL, IMAGE_EXT, resolveImage } from '../images.mjs';
 import { parse as parseToml } from 'smol-toml';
-import { CodexHistory, sessionID } from './codex.mjs';
-import { rpc } from './herdr.mjs';
+import { CodexHistory } from './codex-history.mjs';
+import { sessionID } from './session.mjs';
+import { rpc } from '../herdr.mjs';
 
 function unavailable(connected) {
   return { messages: [], origin: 'Exact Codex transcript unavailable', limited: false,
@@ -126,7 +127,7 @@ export function parseRollout(text, { cwd } = {}) {
   return messages.slice(-300);
 }
 
-export class SourceReader {
+export class CodexSource {
   constructor({ codexHome = process.env.HERDR_VISUALS_CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), history, readFooter } = {}) {
     this.codexHome = codexHome; this.cache = new Map(); this.footerPanes = new Set();
     this.history = history || new CodexHistory(codexHome);

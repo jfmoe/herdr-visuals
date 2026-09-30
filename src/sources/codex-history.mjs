@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 
-export const sessionID = /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i;
+import { sessionID } from './session.mjs';
 const maxBytes = 16 * 1024 * 1024;
 
 // Read-only connection to the already-running local server. Never start/resume
@@ -43,7 +43,7 @@ export class CodexHistory {
       });
       socket.once('open', async () => {
         try {
-          await this.request('initialize', { clientInfo: { name: 'herdr-visuals', version: '0.1.7' }, capabilities: { experimentalApi: true } });
+          await this.request('initialize', { clientInfo: { name: 'herdr-visuals', version: '0.2.0' }, capabilities: { experimentalApi: true } });
           socket.send(JSON.stringify({ method: 'initialized' })); resolve();
         } catch (error) { reject(error); socket.close(); }
       });

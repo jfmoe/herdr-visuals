@@ -7,14 +7,14 @@ import { parse } from 'smol-toml';
 const file = process.env.HERDR_CONFIG_PATH || path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'herdr', 'config.toml');
 const before = await fs.readFile(file, 'utf8');
 const config = parse(before);
-const existing = (config.keys?.command || []).filter(binding => binding.key === 'prefix+v');
+const existing = (config.keys?.command || []).filter(binding => binding.key === 'alt+m');
 if (existing.length) {
   if (existing.length !== 1 || existing[0].type !== 'plugin_action' || existing[0].command !== 'hx-w.visuals.open') {
-    throw new Error(`prefix+v already has a custom binding in ${file}. No changes made.`);
+    throw new Error(`alt+m already has a custom binding in ${file}. No changes made.`);
   }
-  console.log(`Already bound: prefix+v -> hx-w.visuals.open (${file})`);
+  console.log(`Already bound: alt+m -> hx-w.visuals.open (${file})`);
 } else {
-  const after = before + '\n# Herdr Visuals\n[[keys.command]]\nkey = "prefix+v"\ntype = "plugin_action"\ncommand = "hx-w.visuals.open"\ndescription = "Visual previews"\n';
+  const after = before + '\n# Herdr Visuals\n[[keys.command]]\nkey = "alt+m"\ntype = "plugin_action"\ncommand = "hx-w.visuals.open"\ndescription = "Visual previews"\n';
   parse(after);
   const stamp = new Date().toISOString().replaceAll(':', '-');
   const backup = `${file}.visuals-backup-${stamp}`;
@@ -24,5 +24,5 @@ if (existing.length) {
   const stat = await fs.stat(file);
   await fs.writeFile(temporary, after, { mode: stat.mode & 0o777, flag: 'wx' });
   await fs.rename(temporary, file);
-  console.log(`Bound prefix+v -> hx-w.visuals.open\nBackup: ${backup}\nRun: herdr server reload-config`);
+  console.log(`Bound alt+m -> hx-w.visuals.open\nBackup: ${backup}\nRun: herdr server reload-config`);
 }
