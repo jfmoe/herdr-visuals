@@ -21,6 +21,7 @@ def stop(*_):
 
 signal.signal(signal.SIGTERM, stop)
 pending = b''
+terminal_queries = b''
 while child.poll() is None:
     ready, _, _ = select.select([master, sys.stdin.buffer], [], [], 0.2)
     if master in ready:
@@ -28,6 +29,11 @@ while child.poll() is None:
             data = os.read(master, 65536)
         except OSError:
             break
+        terminal_queries += data
+        while b'\x1b[16t' in terminal_queries:
+            _, terminal_queries = terminal_queries.split(b'\x1b[16t', 1)
+            os.write(master, b'\x1b[6;40;20t')
+        terminal_queries = terminal_queries[-4:]
         sys.stdout.buffer.write(data)
         sys.stdout.buffer.flush()
     if sys.stdin.buffer in ready:

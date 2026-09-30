@@ -1,9 +1,9 @@
 {
   "name": "herdr-visuals",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "type": "module",
-  "description": "Mermaid, math and local image previews through Herdr's Kitty graphics proxy",
+  "description": "Mermaid, math and local image previews through native Kitty graphics",
   "engines": {
     "node": ">=22"
   },

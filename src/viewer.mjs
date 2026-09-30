@@ -11,6 +11,7 @@ import { SourceReader } from './source.mjs';
 import { PreviewModel } from './model.mjs';
 import { Renderer } from './render.mjs';
 import { answerContext, paneIdentity } from './navigation.mjs';
+import { clearGraphics, imageGraphics, terminalInput } from './graphics.mjs';
 
 const model = new PreviewModel(), renderer = new Renderer(), reader = new SourceReader();
 let contextView = null, navigating = false;
@@ -18,9 +19,10 @@ let sourcePane = process.env.HERDR_VISUALS_SOURCE, origin = '', sourceLabel = ''
 let sourceIssue = null;
 let raw = false, list = false, help = false, search = null, zoom = 1, x = 0, y = 0, fitDiagram = false;
 let stopping = false, drawing = false, dirty = true, polling = false, request = 0, selection = false;
-let lastImageKey, metrics, timer, hasImage = false, exporting = false, sessionIdentity;
+let lastImageKey, timer, hasImage = false, exporting = false, sessionIdentity;
 let viewRevision = 0, sourceGeneration = 0;
 let commandServer, pendingCommand;
+let cellSize = { width: 20, height: 40 };
 const paneId = process.env.HERDR_PANE_ID;
 const fileArg = process.argv.indexOf('--file');
 const file = fileArg >= 0 ? process.argv[fileArg + 1] : null;
@@ -53,9 +55,11 @@ function contextRows(context, width) {
   return result;
 }
 async function clearImage() {
-  if (hasImage) await rpc('pane.graphics.clear', { pane_id: paneId, layer_id: 'visuals' }).catch(() => {});
+  const erase = hasImage;
   hasImage = false;
   lastImageKey = null;
+  if (erase) await new Promise((resolve, reject) => process.stdout.write(
+    clearGraphics(), error => error ? reject(error) : resolve()));
 }
 async function poll() {
   if (polling || stopping) return;
@@ -143,13 +147,19 @@ async function draw() {
       }
       return;
     }
-    // Probe on every changed frame to adapt to terminal DPI and resized clients.
-    metrics = await rpc('pane.graphics.info', { pane_id: paneId });
-    if (!metrics.cell_width_px || !metrics.cell_height_px) throw new Error('No graphics-capable client attached. Use s for source view.');
+    if (raw) {
+      await clearImage();
+      const lines = (model.current.raw || model.current.source || '').split('\n');
+      for (let i = 0; i < rows - 7; i++) {
+        const text = lines[Math.floor(y / 24) + i] || '';
+        line(i + 5, ' ' + [...safe(text)].slice(Math.floor(x / 12)).join(''));
+      }
+      return;
+    }
     const gridRows = rows - 8, gridCols = cols - 2;
-    const scale = Math.min(1, 2400 / (gridCols * metrics.cell_width_px), 1800 / (gridRows * metrics.cell_height_px));
-    const width = Math.round(gridCols * metrics.cell_width_px * scale / 2);
-    const height = Math.round(gridRows * metrics.cell_height_px * scale / 2);
+    const scale = Math.min(1, 2400 / (gridCols * cellSize.width), 1800 / (gridRows * cellSize.height));
+    const width = Math.round(gridCols * cellSize.width * scale / 2);
+    const height = Math.round(gridRows * cellSize.height * scale / 2);
     const block = model.current;
     const revision = viewRevision;
     const key = JSON.stringify([block.id, width, height, x, y, zoom, raw, fitDiagram]);
@@ -159,11 +169,10 @@ async function draw() {
       const frame = await renderer.render(block, { width, height, zoom, x, y, source: raw, fit: fitDiagram });
       if (stopping || revision !== viewRevision || block.id !== model.current?.id || contextView || help || list || search !== null) { dirty = true; return; }
       x = frame.x; y = frame.y;
-      await rpc('pane.graphics.set', { pane_id: paneId, layer_id: 'visuals', format: 'png',
-        image_width: frame.imageWidth, image_height: frame.imageHeight, data_base64: frame.png.toString('base64'),
-        placement: { viewport_col: 1, viewport_row: 4, grid_cols: gridCols, grid_rows: gridRows } });
-      lastImageKey = key;
       hasImage = true;
+      await new Promise((resolve, reject) => process.stdout.write(
+        imageGraphics(frame.png, { cols: gridCols, rows: gridRows }), error => error ? reject(error) : resolve()));
+      lastImageKey = key;
       if (frame.error) line(rows - 2, ' Render error — source shown. Press s to inspect or y to copy.', '\x1b[31m');
     }
   } catch (error) {
@@ -285,10 +294,15 @@ async function main() {
   if (process.env.HERDR_ENV !== '1' || !paneId) throw new Error('Run this viewer inside Herdr.');
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Visuals requires an interactive terminal pane.');
   process.stdout.write('\x1b[?1049h\x1b[?25l\x1b[2J');
-  readline.emitKeypressEvents(process.stdin);
+  const keys = terminalInput(process.stdin, next => {
+    if (next.width !== cellSize.width || next.height !== cellSize.height) { cellSize = next; resetView(); }
+  });
+  readline.emitKeypressEvents(keys);
   process.stdin.setRawMode(true); process.stdin.resume();
-  process.stdin.on('keypress', (text, key) => { keypress(text, key).catch(error => { notice = error.message; dirty = true; }); });
-  process.stdout.on('resize', () => { resetView(); });
+  keys.on('keypress', (text, key) => { keypress(text, key).catch(error => { notice = error.message; dirty = true; }); });
+  const queryCellSize = () => { keys.expectCellSize(); process.stdout.write('\x1b[16t'); };
+  process.stdout.on('resize', () => { queryCellSize(); resetView(); });
+  queryCellSize();
   process.on('SIGTERM', close); process.on('SIGHUP', close); process.on('SIGINT', close);
   if (process.env.HERDR_VISUALS_RECORD) {
     const socket = process.env.HERDR_VISUALS_RECORD + '.sock';

@@ -31,11 +31,11 @@ Press `l` to open the list, `j` / `k` to select an item, and Enter to view it.
 
 ## Install
 
-Requires Herdr 0.9.0+, Node.js 22+, npm, and a graphics-capable terminal such as
-Ghostty, kitty, or WezTerm. Herdr's `[terminal].kitty_graphics` must be enabled.
+Requires Herdr 0.9.2+ (0.9.3 recommended), Node.js 22+, npm, and a
+graphics-capable terminal such as Ghostty, kitty, or WezTerm. Herdr's `[terminal].kitty_graphics` must be enabled.
 
 ```sh
-herdr plugin install hx-w/herdr-visuals
+herdr plugin install hx-w/herdr-visuals --ref v0.1.6
 ```
 
 Installation runs `npm ci --ignore-scripts` and downloads Playwright's pinned
@@ -141,26 +141,29 @@ Completed Codex image-generation records also appear directly, including the
 original image behind a `Saved to: file://...` notice. Visuals prefers the embedded
 original and uses the typed saved path when pixels are absent. It does not search
 arbitrary tool logs for paths, and the matching tool-result preview is not repeated.
-Large images automatically fit the preview area. Complex previews are downsampled
-in memory to fit Herdr's 512 KiB inline image limit and 1 MiB socket request
-limit, preserving the complete viewport.
-Zoom and pan still work; adaptation does not change the source file or exported
-image resolution. Valid images are no longer rejected solely for exceeding
+Large images automatically fit the preview area. Previews stream as standard
+Kitty graphics in 4 KiB Base64 chunks, preserving
+pixel resolution without the removed socket API's image/request limits.
+Zoom, pan, and export retain their original resolution.
+Valid images are no longer rejected solely for exceeding
 32 MiB or 40 megapixels; decoding remains subject to browser and available memory.
 
 Animated formats are captured as a static preview. HTTP image URLs are not
 downloaded automatically. Missing or unsupported files show an explicit error.
 
-### Kitty graphics proxy
+### Native Kitty graphics
 
-All previews, including local images, use Herdr's `pane.graphics.info/set/clear`
-API and its Kitty graphics proxy to the attached terminal. The plugin sends
-PNG pixels over the Herdr socket; the client handles terminal placement. It
-does not write escape sequences into the source agent's pane, require `icat`,
-or depend on a shared file path on the client. This also permits server-side
-image paths in a remote Herdr session. Remote display has not been live-tested.
-When graphics are unavailable, `s` provides a terminal source view; Visuals
-does not substitute ASCII art for an image.
+All previews write standard Kitty graphics into the Visuals terminal. Herdr
+renders them natively and handles placement in the attached terminal. The plugin
+uses no `pane.graphics` socket methods, `icat`, or shared client file paths.
+Images are anchored below the header and removed when opening text/list views,
+changing to an empty scope, or closing the viewer. Terminal cell-size reports
+adapt rendering to the attached client's DPI; terminals without reports use a
+standard 1:2 cell ratio.
+
+Image files are read on the server, so remote previews do not need client access
+to their paths. Remote display has not been live-tested. If the terminal cannot
+display Kitty graphics, press `s` for source view.
 
 Inline math stays in prose and does not create separate items. Ordinary code
 fences are skipped. Incomplete blocks wait for completion; rendering errors

@@ -157,7 +157,7 @@ test('real viewer lists embedded images, opens image context and clears them on 
       const call = JSON.parse(buffer.slice(0, buffer.indexOf('\n'))); calls.push(call);
       const value = call.method === 'pane.get' ? { pane: { pane_id: 'source', terminal_id: 'terminal', label: 'Preview source',
         agent_session: { agent: 'codex', kind: 'id', value: session } } }
-        : call.method === 'pane.graphics.info' ? { cell_width_px: 20, cell_height_px: 40, pane_visible: true } : {};
+        : {};
       socket.end(JSON.stringify({ id: call.id, result: value }) + '\n');
     });
   });
@@ -166,27 +166,27 @@ test('real viewer lists embedded images, opens image context and clears them on 
     env: { ...process.env, HERDR_ENV: '1', HERDR_SOCKET_PATH: socketPath, HERDR_PANE_ID: 'viewer', HERDR_VISUALS_SOURCE: 'source',
       HERDR_VISUALS_CODEX_HOME: dir, HERDR_VISUALS_RECORD: '' }, stdio: ['pipe', 'pipe', 'pipe'],
   });
-  let output = ''; child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { output += data; });
+  let output = '', graphicsOutput = ''; child.stdout.on('data', data => { output += data; graphicsOutput += data; }); child.stderr.on('data', data => { output += data; });
   const keys = keys => child.stdin.write(JSON.stringify({ keys }) + '\n');
   const until = async predicate => {
     const end = Date.now() + 15000;
     while (!predicate()) { if (Date.now() > end) throw new Error(`Viewer timeout: ${output.slice(-1000)}`); await delay(30); }
   };
   try {
-    await until(() => calls.some(c => c.method === 'pane.graphics.set'));
+    await until(() => output.includes('\x1b_Ga=T,'));
     assert.match(output, /2 items/);
     keys('l'); await until(() => output.includes('IMAGE  Image 1') && output.includes('IMAGE  Image 2'));
     keys('\r'); keys('g'); await until(() => output.includes('Image context') && output.includes('Embedded image displayed in this conversation'));
     assert.match(output, /Embedded image displayed in this conversation/);
     assert.doesNotMatch(output, /PRIVATE LOG|base64/);
-    const frames = calls.filter(c => c.method === 'pane.graphics.set').length;
-    keys('\x1b'); await until(() => calls.filter(c => c.method === 'pane.graphics.set').length > frames);
+    const frames = [...graphicsOutput.matchAll(/\x1b_Ga=T,/g)].length;
+    keys('\x1b'); await until(() => [...graphicsOutput.matchAll(/\x1b_Ga=T,/g)].length > frames);
     keys('p'); await until(() => output.includes('PINNED'));
-    const clears = calls.filter(c => c.method === 'pane.graphics.clear').length;
+    const clearSequence = '\x1b_Ga=d,d=I,i=1,q=2\x1b\\';
     output = ''; session = '019f47ac-0000-7000-8000-000000000002';
-    await until(() => output.includes('transcript unavailable') && calls.filter(c => c.method === 'pane.graphics.clear').length > clears);
+    await until(() => output.includes('transcript unavailable') && output.includes(clearSequence));
     assert.match(output, /0 items/); assert.doesNotMatch(output, /PINNED|Image context/);
-    assert.ok(calls.every(c => ['pane.get', 'pane.graphics.info', 'pane.graphics.set', 'pane.graphics.clear'].includes(c.method)));
+    assert.ok(calls.every(c => c.method === 'pane.get'));
     keys('q'); await until(() => child.exitCode !== null); assert.equal(child.exitCode, 0);
   } finally { child.kill('SIGTERM'); server.close(); await fs.rm(dir, { recursive: true, force: true }); }
 });

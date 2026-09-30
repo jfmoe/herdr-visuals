@@ -25,10 +25,7 @@ test('real PTY viewer clears empty filters, exports the selected item and tears 
       buffer += data;
       if (!buffer.includes('\n')) return;
       const call = JSON.parse(buffer.slice(0, buffer.indexOf('\n'))); calls.push(call);
-      const result = call.method === 'pane.graphics.info'
-        ? { type: 'pane_graphics_info', cell_width_px: 20, cell_height_px: 40, pane_visible: true }
-        : { type: call.method === 'pane.graphics.set' ? 'pane_graphics_set' : 'pane_graphics_cleared' };
-      socket.end(JSON.stringify({ id: call.id, result }) + '\n');
+      socket.end(JSON.stringify({ id: call.id, error: { message: 'unknown_method' } }) + '\n');
     });
   });
   await new Promise(resolve => server.listen(socketPath, resolve));
@@ -36,9 +33,9 @@ test('real PTY viewer clears empty filters, exports the selected item and tears 
     env: { ...process.env, HERDR_ENV: '1', HERDR_PANE_ID: 'test:viewer', HERDR_SOCKET_PATH: socketPath,
       HERDR_VISUALS_RECORD: '', HERDR_VISUALS_EXPORT_DIR: dir }, stdio: ['pipe', 'pipe', 'pipe'],
   });
-  let output = ''; child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { output += data; });
+  let output = '', graphicsOutput = ''; child.stdout.on('data', data => { output += data; graphicsOutput += data; }); child.stderr.on('data', data => { output += data; });
   const keys = text => child.stdin.write(JSON.stringify({ keys: text }) + '\n');
-  const sets = () => calls.filter(c => c.method === 'pane.graphics.set');
+  const sets = () => [...graphicsOutput.matchAll(/\x1b_Ga=T,([^;]+);/g)];
   try {
     await until(() => sets().length > 0, 'first rendered frame');
     assert.match(output, /This session/);
@@ -54,7 +51,7 @@ test('real PTY viewer clears empty filters, exports the selected item and tears 
     await until(() => sets().length >= 2, 'Escape returns from context without closing');
     assert.equal(child.exitCode, null);
     keys('fff'); // all -> Mermaid -> math -> empty image filter
-    await until(() => calls.at(-1)?.method === 'pane.graphics.clear', 'clear old image on empty scope');
+    await until(() => output.includes('\x1b_Ga=d,d=I,i=1,q=2\x1b\\') && output.includes('0 items'), 'clear old image on empty scope');
     assert.match(output, /0 items/);
     const beforeRestore = sets().length;
     keys('f'); await until(() => sets().length > beforeRestore, 'restore all');
@@ -71,14 +68,21 @@ test('real PTY viewer clears empty filters, exports the selected item and tears 
       await oracle.render(extract(source)[1], { width: 1000, height: 700 });
       assert.deepEqual(await fs.readFile(path.join(exported, names.find(n => n.endsWith('.png')))), await oracle.exportPNG());
     } finally { await oracle.close(); }
+    const beforeSource = sets().length;
+    output = ''; keys('s');
+    await until(() => output.includes('\\bar{x}'), 'source view is terminal text');
+    assert.ok(output.includes('\x1b_Ga=d,d=I,i=1,q=2\x1b\\'));
+    assert.equal(sets().length, beforeSource, 'source view requires no graphics');
+    keys('s'); await until(() => sets().length > beforeSource, 'return from source');
     const count = sets().length;
     child.stdin.write(JSON.stringify({ resize: [70, 22] }) + '\n');
     await until(() => sets().length > count, 'resize redraw');
-    assert.equal(sets().at(-1).params.placement.grid_cols, 68);
+    assert.match(sets().at(-1)[1], /c=68,r=14,/);
     keys('q');
     await until(() => child.exitCode !== null, 'viewer exit');
     assert.equal(child.exitCode, 0);
-    assert.equal(calls.at(-1).method, 'pane.graphics.clear');
+    assert.match(output, /\x1b_Ga=d,d=I,i=1,q=2\x1b\\\x1b\[\?25h/);
+    assert.deepEqual(calls, [], 'file preview uses no Herdr socket graphics API');
   } finally {
     child.kill('SIGTERM');
     server.close();
@@ -104,7 +108,6 @@ test('viewer reads only its bound session and clears a pin when that pane starts
       let result = {};
       if (call.method === 'pane.get') result = { pane: { pane_id: 'source', terminal_id: 'terminal', agent: 'codex', cwd: dir,
         ...(currentId ? { agent_session: { agent: 'codex', kind: 'id', value: currentId } } : {}) } };
-      if (call.method === 'pane.graphics.info') result = { cell_width_px: 20, cell_height_px: 40, pane_visible: true };
       // Any unscoped focus/session-list query is a regression, regardless of its result.
       const response = call.method === 'pane.get' && getError ? { id: call.id, error: { message: 'offline' } } : { id: call.id, result };
       if (call.method === 'pane.get' && getDelay) setTimeout(() => socket.end(JSON.stringify(response) + '\n'), getDelay);
@@ -116,20 +119,20 @@ test('viewer reads only its bound session and clears a pin when that pane starts
     env: { ...process.env, HERDR_ENV: '1', HERDR_PANE_ID: 'viewer', HERDR_SOCKET_PATH: socketPath,
       HERDR_VISUALS_RECORD: '', HERDR_VISUALS_SOURCE: 'source', HERDR_VISUALS_CODEX_HOME: dir }, stdio: ['pipe', 'pipe', 'pipe'],
   });
-  let output = ''; child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { output += data; });
+  let output = '', graphicsOutput = ''; child.stdout.on('data', data => { output += data; graphicsOutput += data; }); child.stderr.on('data', data => { output += data; });
   const keys = value => child.stdin.write(JSON.stringify({ keys: value }) + '\n');
   try {
-    await until(() => output.includes('Codex session is not connected.'), 'missing session identity is actionable');
+    await until(() => output.includes('Codex session is not connected.') && output.includes('SessionStart'), 'missing session identity is actionable');
     assert.doesNotMatch(output, /No diagrams/);
     assert.match(output, /SessionStart/);
     output = ''; currentId = ids[0];
-    await until(() => output.includes('Session 1') && calls.some(c => c.method === 'pane.graphics.set'), 'first session');
+    await until(() => output.includes('Session 1') && output.includes('\x1b_Ga=T,'), 'first session');
     assert.doesNotMatch(output, /not connected/);
     getError = true; output = ''; keys('g');
     await until(() => output.includes('Cannot verify source session'), 'lookup error fails closed');
-    assert.doesNotMatch(output, /Answer context/);
+    assert.doesNotMatch(output.split('\x1b[1;1H').at(-1), /Answer context/);
     getError = false; getDelay = 500; output = ''; keys('g\x1b');
-    await delay(700); assert.equal(child.exitCode, null); assert.doesNotMatch(output, /Answer context/);
+    await delay(700); assert.equal(child.exitCode, null); assert.doesNotMatch(output.split('\x1b[1;1H').at(-1), /Answer context/);
     getDelay = 0;
     keys('g'); await until(() => output.includes('Answer context'), 'bound answer context fallback');
     output = '';
@@ -143,7 +146,7 @@ test('viewer reads only its bound session and clears a pin when that pane starts
     await until(() => output.includes('1 new answer'), 'queue a new answer while reading context');
     output = ''; keys('p');
     await until(() => output.includes('New answer') && output.includes('LIVE'), 'unpin resumes queued answer');
-    assert.doesNotMatch(output, /Answer context/);
+    assert.doesNotMatch(output.split('\x1b[1;1H').at(-1), /Answer context/);
     output = ''; keys('[pg'); await until(() => output.includes('Answer context'), 'pin earlier answer again');
     output = ''; currentId = ids[1];
     await until(() => output.includes('Session 2'), 'new session in same pane');
