@@ -4,6 +4,9 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { extract, digest } from './extract.mjs';
 import { imageDataURL, IMAGE_EXT, resolveImage } from './images.mjs';
+import { parse as parseToml } from 'smol-toml';
+import { CodexHistory, sessionID } from './codex.mjs';
+import { rpc } from './herdr.mjs';
 
 function unavailable(connected) {
   return { messages: [], origin: 'Exact Codex transcript unavailable', limited: false,
@@ -12,7 +15,7 @@ function unavailable(connected) {
       hint: 'Check the Codex home and transcript location; or preview selected text.',
     } : {
       title: 'Codex session is not connected.',
-      hint: "Check Herdr's Codex SessionStart integration; or preview selected text.",
+      hint: "Enable thread-id first in the Codex status line; or check Herdr's SessionStart binding.",
     } };
 }
 
@@ -86,6 +89,14 @@ export function parseRollout(text, { cwd } = {}) {
       }
       continue;
     }
+    if (row.type === 'response_item' && p?.type === 'image_view') {
+      try {
+        if (typeof p.path === 'string' && path.isAbsolute(p.path) && IMAGE_EXT.test(p.path)) {
+          addImage(row, 0, { source: resolveImage(p.path) });
+        }
+      } catch { /* invalid typed paths do not become image sources */ }
+      continue;
+    }
     if (row.type === 'response_item' && ['function_call_output', 'custom_tool_call_output'].includes(p?.type)) {
       const content = outputContent(p.output);
       const images = content.map(imageDataURL).filter(Boolean);
@@ -116,9 +127,36 @@ export function parseRollout(text, { cwd } = {}) {
 }
 
 export class SourceReader {
-  constructor({ codexHome = process.env.HERDR_VISUALS_CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), '.codex') } = {}) {
-    this.codexHome = codexHome; this.cache = new Map();
+  constructor({ codexHome = process.env.HERDR_VISUALS_CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), history, readFooter } = {}) {
+    this.codexHome = codexHome; this.cache = new Map(); this.footerPanes = new Set();
+    this.history = history || new CodexHistory(codexHome);
+    this.readFooter = readFooter || (async pane => (await rpc('pane.read', { pane_id: pane.pane_id, source: 'visible', lines: 3 })).read.text);
   }
+  async resolvePane(pane) {
+    if (!pane.pane_id) return pane;
+    const key = `${pane.pane_id}:${pane.terminal_id || ''}`;
+    const fallback = () => this.footerPanes.has(key) ? { ...pane, agent_session: undefined } : pane;
+    if (pane.agent !== 'codex') return fallback();
+    let configured;
+    try {
+      const config = parseToml(await fs.readFile(path.join(this.codexHome, 'config.toml'), 'utf8'));
+      configured = ['thread-id', 'session-id'].includes(config.tui?.status_line?.[0]);
+    } catch { return fallback(); }
+    if (!configured) return fallback();
+    // This is only the live footer's explicit identifier, never a transcript,
+    // status card in scrollback, title substring, or cwd/session-list heuristic.
+    let text;
+    try { text = await this.readFooter(pane); } catch { return fallback(); }
+    if (typeof text !== 'string') return fallback();
+    const footer = text.trimEnd().split('\n').slice(-3);
+    const matches = footer.map(line => line.trim().match(/^([a-f\d-]{36})(?:\s+[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])?\s+·\s+/i)?.[1]).filter(id => sessionID.test(id || ''));
+    // Once a terminal supplies live identity, missing/ambiguous identity must
+    // clear it rather than falling back to an older hook's session.
+    if (matches.length !== 1) return fallback();
+    this.footerPanes.add(key);
+    return { ...pane, agent_session: { agent: 'codex', kind: 'id', value: matches[0], source: 'visuals:codex-footer' } };
+  }
+  close() { this.history.close?.(); }
   async resolve(id) {
     if (!/^[a-f\d-]{36}$/i.test(id || '')) return null;
     const cached = this.cache.get(id);
@@ -143,6 +181,14 @@ export class SourceReader {
   async read(pane) {
     if (pane.agent_session?.agent === 'codex' && pane.agent_session.kind === 'id') {
       const id = pane.agent_session.value;
+      if (!sessionID.test(id || '')) return unavailable(true);
+      try {
+        const current = await this.history.read(id);
+        if (current) return { messages: parseRollout(current.rows.map(row => JSON.stringify(row)).join('\n'), { cwd: current.cwd || pane.foreground_cwd || pane.cwd }), origin: 'Codex history', limited: current.limited, issue: null };
+      } catch (error) {
+        // A known active server failure must not silently show a stale snapshot.
+        return { ...unavailable(true), issue: { title: 'The bound Codex history is unavailable.', hint: error.message } };
+      }
       let file = await this.resolve(id);
       if (file) {
         try { await fs.access(file); }

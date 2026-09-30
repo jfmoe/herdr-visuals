@@ -5,6 +5,7 @@
 - Never commit session transcripts, exports, host paths, tokens, or test-output images.
 - Examples must use generic fictional content, with no dental, clinical, or internal project material.
 - Read only the exact Codex session attached to the selected Herdr pane. Do not guess by cwd.
+- Codex app-server access is read-only: initialize, thread/read metadata and thread/items/list for the exact ID only. Never discover, resume or start threads. Live footer identity takes precedence over hooks; losing an observed footer identity clears stale bindings.
 - Never follow focus to another session. Scope history/search to the bound session and clear records/pins on explicit source or session identity changes.
 - Keep Mermaid strict, KaTeX trust disabled, and browser network/file access restricted.
 - Only explicit user export writes conversation content to disk.

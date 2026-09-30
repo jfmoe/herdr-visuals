@@ -35,7 +35,7 @@ Requires Herdr 0.9.2+ (0.9.3 recommended), Node.js 22+, npm, and a
 graphics-capable terminal such as Ghostty, kitty, or WezTerm. Herdr's `[terminal].kitty_graphics` must be enabled.
 
 ```sh
-herdr plugin install hx-w/herdr-visuals --ref v0.1.6
+herdr plugin install hx-w/herdr-visuals --ref v0.1.7
 ```
 
 Installation runs `npm ci --ignore-scripts` and downloads Playwright's pinned
@@ -65,6 +65,22 @@ herdr plugin action invoke hx-w.visuals.example
 
 Use `[` / `]` to browse, `0` to fit a wide diagram, and `s` to inspect its source.
 To preview your conversation, open Visuals from the Codex pane with **prefix+v**.
+
+For Codex versions that use a shared app-server daemon, put `thread-id` first in
+the existing `[tui].status_line` array in your Codex `config.toml`. Keep your other
+status items after it, for example:
+
+```toml
+[tui]
+status_line = ["thread-id", "model-with-reasoning", "project-name"]
+```
+
+This displays the full current session ID in the live footer. New Codex panes
+and new threads load this setting. Existing panes can keep using Herdr's exact
+session binding. If an existing pane is disconnected, run `/status` in that pane
+and bind its displayed Session ID with
+`herdr pane report-agent-session <pane-id> --source herdr:codex --agent codex --agent-session-id <session-id>`.
+Never substitute an ID found by matching the working directory.
 
 ## Interaction
 
@@ -170,19 +186,27 @@ fences are skipped. Incomplete blocks wait for completion; rendering errors
 show the source and the parser error instead of silently changing the input.
 Use `aligned` inside math delimiters for multi-line derivations.
 
-Codex is resolved using the exact `agent_session` ID reported by Herdr. The
-adapter reads assistant final messages, typed images in tool results, and completed
-image-generation records from that
-session's JSONL transcript. Prompts, tool text, commentary and internal reasoning
-are excluded. A shared working directory is never used to select another session.
-History is bounded to the last 16 MiB and 300 answer/image records. If the JSONL
-file cannot be located, the UI shows an unavailable state. It never scans terminal
-scrollback, because that can contain older sessions. Explicit selected-text preview
-remains available. Automatic history discovery currently supports Codex only.
+Codex is resolved using the full ID in the configured live footer, or the exact
+`agent_session` ID reported by Herdr. The footer reader checks only the last three
+visible rows of the selected pane; it never searches scrollback or guesses by cwd.
+For paginated Codex history, Visuals connects read-only to the already-running
+local app-server and requests only that ID's metadata and items. It never lists,
+starts, resumes, or modifies threads. Older sessions use their exact JSONL file.
+An active history API failure shows an error instead of silently showing a stale
+JSONL snapshot.
+
+The adapter reads assistant final messages, typed tool images, viewed image paths,
+and completed image-generation records. Prompts, tool text, commentary and
+internal reasoning are excluded. History keeps the newest 1,000 API items within
+a 16 MiB budget (the final complete item may exceed it), then at most 300
+answer/image records. Partial history is labeled. Explicit selected-text preview
+remains available. Automatic session reading currently supports Codex only.
 
 If Visuals says **Codex session is not connected**, Herdr has not supplied the
-source pane's session identity. Check `herdr integration status` and the Codex
-SessionStart integration. This is different from a connected session containing
+source pane's session identity. Configure the Codex footer as described above or
+check `herdr integration status` and the SessionStart binding. With a shared Codex
+daemon, hooks can inherit the daemon's old pane environment instead of the current
+TUI's pane. This is different from a connected session containing
 no visual items, or an identified transcript that cannot be found. Visuals retries
 the bound pane automatically when its identity becomes available; it never guesses
 from the working directory. Selected-text previews still work while disconnected.

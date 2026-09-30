@@ -91,7 +91,8 @@ async function poll() {
     if (!sourcePane) throw new Error('No source pane. Open Visuals from a Codex pane.');
     const expectedSource = sourcePane;
     const expectedGeneration = sourceGeneration;
-    const { pane } = await rpc('pane.get', { pane_id: expectedSource });
+    const response = await rpc('pane.get', { pane_id: expectedSource });
+    const pane = await reader.resolvePane(response.pane);
     if (sourcePane !== expectedSource || sourceGeneration !== expectedGeneration) return;
     const identity = paneIdentity(pane);
     if (sessionIdentity !== undefined && sessionIdentity !== identity) {
@@ -184,6 +185,7 @@ async function draw() {
 async function close() {
   if (stopping) return;
   stopping = true; clearInterval(timer);
+  reader.close();
   while (drawing || exporting) await new Promise(resolve => setTimeout(resolve, 20));
   await clearImage();
   await renderer.close();
@@ -228,7 +230,8 @@ async function keypress(text, key = {}) {
     try {
       // Validate the bound identity before revealing a cached answer: it must
       // never be revealed after the bound pane has switched sessions.
-      const { pane } = await rpc('pane.get', { pane_id: expectedPane });
+      const response = await rpc('pane.get', { pane_id: expectedPane });
+      const pane = await reader.resolvePane(response.pane);
       if (!valid()) return;
       if (paneIdentity(pane) !== expectedIdentity) { resetSource(); notice = 'Source session changed. Refreshing records.'; return; }
       contextView = capturedContext; dirty = true;
@@ -333,6 +336,7 @@ async function main() {
 }
 main().catch(async error => {
   console.error(error.message);
+  reader.close();
   await renderer.close();
   if (process.stdin.isTTY) process.stdin.setRawMode(false);
   process.stdout.write('\x1b[?25h\x1b[?1049l');
